@@ -15,6 +15,7 @@
 from .dispatch import RequestsDispatcher
 from . import auth
 from . import models
+import requests
 
 
 class Client(object):
@@ -80,6 +81,7 @@ class Client(object):
         paths = ['scenes/%s/%s/thumb' % (scene_type, sid) for sid in scene_ids]
         return self._download_many(paths, params, callback)
 
+
     def list_mosaics(self):
         """
         List all mosaics.
@@ -87,6 +89,7 @@ class Client(object):
         .. todo:: Pagination
         """
         return self._get('mosaics').get_body()
+
 
     def get_mosaic(self, name):
         """
@@ -96,3 +99,26 @@ class Client(object):
             Mosaic name as returned by `list_mosaics`.
         """
         return self._get('mosaics/%s' % name).get_body()
+
+
+    def get_mosaic_quads(self, name, intersects=None, count=50):
+        """
+        Get metadata for mosaic quads.
+        
+        :param name:
+            Mosaic name as retured by `list_mosaics`.
+        :param intersects:
+            WKT or GeoJSON describing a region of interest.
+        :param count:
+            Number of results to return.
+        """
+
+        params = {}
+        if intersects:
+            params['intersects'] = intersects
+        if count:
+            params['count'] = count
+
+        return self._get('mosaics/%s/quads/' % name, params=params).get_body()
+
+        
