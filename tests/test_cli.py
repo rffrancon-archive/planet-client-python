@@ -31,10 +31,9 @@ import planet
 from planet import api
 from planet.api import models
 from planet import scripts
+from _common import read_fixture
+from _common import clone
 
-
-TEST_DIR = os.path.dirname(os.path.realpath(__file__))
-FIXTURE_DIR = os.path.join(TEST_DIR, 'fixtures')
 
 client = MagicMock(name='client', spec=api.Client)
 scripts.client = lambda: client
@@ -54,6 +53,16 @@ def assert_cli_exception(cause, expected):
         assert False, 'did not throw'
     except ClickException as ex:
         assert str(ex) == expected
+
+
+def test_build_conditions():
+    workspace = json.loads(read_fixture('workspace.json'))
+    c = scripts.build_conditions(workspace)
+    assert c['image_statistics.snr.gt'] == 10
+    assert c['sat.off_nadir.lte'] == 25
+    assert c['sat.alt.gte'] == 200
+    assert c['sat.alt.lte'] == 650
+    assert c['age.lte'] == 63072000
 
 
 def test_exception_translation():
@@ -83,9 +92,7 @@ def test_api_key_flag():
 
 def test_search():
 
-    fixture_path = os.path.join(FIXTURE_DIR, 'search.geojson')
-    with open(fixture_path, 'r') as src:
-        expected = src.read()
+    expected = read_fixture('search.geojson')
 
     response = MagicMock(spec=models.JSON)
     response.get_raw.return_value = expected
@@ -99,13 +106,8 @@ def test_search():
 
 def test_search_by_aoi():
 
-    aoi_path = os.path.join(FIXTURE_DIR, 'aoi.geojson')
-    with open(aoi_path, 'r') as src:
-        aoi = src.read()
-
-    fixture_path = os.path.join(FIXTURE_DIR, 'search-by-aoi.geojson')
-    with open(fixture_path, 'r') as src:
-        expected = src.read()
+    aoi = read_fixture('search-by-aoi.geojson')
+    expected = read_fixture('search-by-aoi.geojson')
 
     response = MagicMock(spec=models.JSON)
     response.get_raw.return_value = expected
@@ -121,9 +123,7 @@ def test_search_by_aoi():
 def test_metadata():
 
     # Read in fixture
-    fixture_path = os.path.join(FIXTURE_DIR, '20150615_190229_0905.geojson')
-    with open(fixture_path, 'r') as src:
-        expected = src.read()
+    expected = read_fixture('20150615_190229_0905.geojson')
 
     # Construct a response from the fixture
     response = MagicMock(spec=models.JSON)
@@ -160,3 +160,48 @@ def test_init():
         assert data['key'] == 'SECRIT'
     finally:
         os.unlink(test_file)
+
+
+def _set_workspace(workspace, *args, **kw):
+    response = MagicMock(spec=models.JSON)
+    response.get_raw.return_value = '{"status": "OK"}'
+
+    client.set_workspace.return_value = response
+    client.set_workspace.reset_mock()
+    args = ['set-workspace'] + list(args)
+    if workspace:
+        args += [json.dumps(workspace)]
+    result = runner.invoke(scripts.cli, args, input=kw.get('input', None))
+    assert result.exit_code == kw.get('expected_status', 0)
+
+
+def test_workspace_create_no_id():
+
+    workspace = json.loads(read_fixture('workspace.json'))
+    workspace.pop('id')
+    expected = clone(workspace)
+    _set_workspace(workspace)
+    client.set_workspace.assert_called_once_with(expected, None)
+
+
+def test_workspace_create_from_existing():
+
+    workspace = json.loads(read_fixture('workspace.json'))
+    expected = clone(workspace)
+    _set_workspace(workspace, '--create')
+    client.set_workspace.assert_called_once_with(expected, None)
+
+
+def test_workspace_update_from_existing_with_id():
+
+    workspace = json.loads(read_fixture('workspace.json'))
+    expected = clone(workspace)
+    _set_workspace(workspace, '--id', '12345')
+    client.set_workspace.assert_called_once_with(expected, '12345')
+
+
+def test_workspace_update_stdin():
+    workspace = json.loads(read_fixture('workspace.json'))
+    expected = clone(workspace)
+    _set_workspace(workspace)
+    client.set_workspace.assert_called_once_with(expected, workspace['id'])

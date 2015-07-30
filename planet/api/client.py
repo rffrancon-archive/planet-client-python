@@ -18,6 +18,7 @@ from .dispatch import RequestsDispatcher
 from . import auth
 from .exceptions import InvalidIdentity
 from . import models
+from .utils import check_status
 
 
 class Client(object):
@@ -123,3 +124,24 @@ class Client(object):
             Mosaic name as returned by `list_mosaics`.
         """
         return self._get('mosaics/%s' % name).get_body()
+
+    def get_workspaces(self):
+        return self._get('workspaces').get_body()
+
+    def get_workspace(self, id):
+        return self._get('workspaces/%s' % id).get_body()
+
+    def set_workspace(self, workspace, id=None):
+        if id:
+            workspace['id'] = id
+            url = 'workspaces/%s' % id
+            method = 'PUT'
+        else:
+            'id' in workspace and workspace.pop('id')
+            url = 'workspaces/'
+            method = 'POST'
+        result = self.dispatcher.dispatch_request(method, self.base_url + url,
+                                                  data=json.dumps(workspace),
+                                                  auth=self.auth)
+        check_status(result)
+        return models.JSON(result, self.dispatcher)

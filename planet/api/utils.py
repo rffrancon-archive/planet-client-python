@@ -40,6 +40,21 @@ def write_planet_json(contents):
         fp.write(json.dumps(contents))
 
 
+def feature_collection(geometry):
+    return {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {},
+            "geometry": geometry
+        }]
+    }
+
+
+def get_workspace_geometry(workspace):
+    return workspace['filters'].get('geometry', {}).get('intersects', None)
+
+
 def check_status(response):
     '''check the status of the response and if needed raise an APIException'''
     status = response.status_code

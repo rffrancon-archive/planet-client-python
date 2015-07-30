@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from requests_futures.sessions import FuturesSession
+from requests import Request
 from . utils import check_status
 from . models import Response
 from . exceptions import InvalidAPIKey
@@ -40,3 +41,14 @@ class RequestsDispatcher(object):
         response = self._dispatch_async(request, callback).result()
         check_status(response)
         return response
+
+    def dispatch_request(self, method, url, auth=None, params=None, data=None):
+        headers = {}
+        content_type = 'application/json'
+        if auth:
+            headers.update({
+                'Authorization': 'api-key %s' % auth.value,
+                'content-Type': content_type
+            })
+        req = Request(method, url, params=params, data=data, headers=headers)
+        return self.session.send(req.prepare())
