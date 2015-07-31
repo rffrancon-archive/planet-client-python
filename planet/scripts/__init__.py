@@ -18,11 +18,11 @@ import json
 import logging
 import re
 import warnings
-from os import path
 
 import click
 
 import planet
+from planet.api.sync import _SyncTool
 from planet import api
 
 from requests.packages.urllib3 import exceptions as urllib3exc
@@ -286,75 +286,40 @@ def fetch_scene_thumbnails(scene_ids, scene_type, size, fmt, dest):
 
 
 @scene_type
+@workspace
 @click.argument("destination")
 @click.option("--limit", default=-1, help='limit scene syncing')
 @cli.command('sync')
-def sync(destination, scene_type, limit):
-    '''Synchronize a directory to a specified AOI'''
-    if not path.exists(destination) or not path.isdir(destination):
-        raise click.ClickException('destination must exist and be a directory')
-    aoi_file = path.join(destination, 'aoi.geojson')
-    if not path.exists(aoi_file):
-        raise click.ClickException(
-            'provide an aoi.geojson file in "%s"' % destination
-        )
+def sync(destination, workspace, scene_type, limit):
+    '''Synchronize a directory to a specified AOI or workspace'''
     aoi = None
-    with open(aoi_file) as fp:
-        aoi = fp.read()
-    sync_file = path.join(destination, 'sync.json')
-    if path.exists(sync_file):
-        with open(sync_file) as fp:
-            sync = json.loads(fp.read())
-    else:
-        sync = {}
     filters = {}
-    if 'latest' in sync:
-        filters['acquired.gt'] = sync['latest']
+
+    if workspace:
+        workspace = call_and_wrap(client().get_workspace, workspace).get()
+        filters = build_conditions(workspace)
+        aoi = planet.api.utils.get_workspace_geometry(workspace)
+        aoi = json.dumps(planet.api.utils.feature_collection(aoi))
+
+    sync_tool = _SyncTool(client(), destination, aoi,
+                          scene_type, **filters)
     start_time = time.time()
-    transferred = 0
-    _client = client()
-    res = call_and_wrap(_client.get_scenes_list, scene_type=scene_type,
-                        intersects=aoi, count=100, order_by='acquired asc',
-                        **filters)
-    click.echo('total scenes to fetch: %s' % res.get()['count'])
+    try:
+        to_fetch = sync_tool.init(limit)
+    except ValueError as ve:
+        raise click.ClickException(str(ve))
+    click.echo('total scenes to fetch: %s' % to_fetch)
     if limit > 0:
         click.echo('limiting to %s' % limit)
-    counter = type('counter', (object,),
-                   {'remaining': res.get()['count'] if limit < 1 else limit})()
-    latest = None
 
-    def progress_callback(arg):
-        if not isinstance(arg, int):
-            counter.remaining -= 1
-            click.echo('downloaded %s, remaining %s' %
-                       (arg.name, counter.remaining))
-    write_callback = api.write_to_file(destination, progress_callback)
-    for page in res.iter():
-        features = page.get()['features'][:counter.remaining]
-        if not features:
-            break
-        ids = [f['id'] for f in features]
-        futures = _client.fetch_scene_geotiffs(
-            ids, scene_type, callback=write_callback
-        )
-        for f in features:
-            metadata = path.join(destination, '%s_metadata.json' % f['id'])
-            with open(metadata, 'wb') as fp:
-                fp.write(json.dumps(f, indent=2))
-        check_futures(futures)
-        transferred += total_bytes(futures)
-        recent = max([
-            api.strp_timestamp(f['properties']['acquired']) for f in features]
-        )
-        latest = max(latest, recent) if latest else recent
-        if counter.remaining <= 0:
-            break
-    if latest:
-        sync['latest'] = api.strf_timestamp(latest)
-        with open(sync_file, 'wb') as fp:
-            fp.write(json.dumps(sync, indent=2))
-    if transferred:
-        summarize_throughput(transferred, start_time)
+    def progress_callback(name, remaining):
+        click.echo('downloaded %s, remaining %s' %
+                   (name, remaining))
+
+    sync_tool.sync(progress_callback)
+
+    if sync_tool.transferred:
+        summarize_throughput(sync_tool.transferred, start_time)
 
 
 @pretty
